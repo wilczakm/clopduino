@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+// vim: ft=javascript ts=2 sw=2 et :
+// -*- mode:javascript -*-
+var currentValue = null;
+var lastValue = null;
+var lastCall = null;
+var delay = 500;
+var connection = null;
+
+var Gpio = require('onoff').Gpio,
+    light = new Gpio(7, 'in', 'both');
+
+var http = require('http');
+var server = http.createServer(function (req, res) {
+  res.writeHead(200, {'Content-Type': 'text/plain'});
+  res.end(currentValue.toString());
+}).listen(1337, '0.0.0.0');
+
+var WebSocketServer = require('websocket').server;
+
+wsServer = new WebSocketServer({
+    httpServer: server,
+    autoAcceptConnections: false
+});
+
+function originIsAllowed(origin) {
+  // put logic here to detect whether the specified origin is allowed.
+  return true;
+}
+
+wsServer.on('request', function(request) {
+    if (!originIsAllowed(request.origin)) {
+      // Make sure we only accept requests from an allowed origin
+      request.reject();
+      console.log((new Date()) + ' Connection from origin ' + request.origin + ' rejected.');
+      return;
+    }
+
+	connection = request.accept('clopduino-protocol', request.origin);
+	
+	connection.sendUTF(currentValue);
+
+	connection.on('close', function(reasonCode, description) {
+        console.log((new Date()) + ' Peer ' + connection.remoteAddress + ' disconnected.');
+    });
+});
+
+currentValue = !light.readSync();
+
+light.watch(function(err, value) {
+		currentValue = !value;
+		lastCall = new Date().getTime();
+		setTimeout(execute, delay);
+});
+
+function execute(){
+	if(lastCall+delay <= new Date().getTime()){
+		if(currentValue != lastValue){
+			doStuff();
+			lastValue = currentValue;
+		}
+	}
+}
+
+function doStuff(){
+	console.log(currentValue);
+	if(connection != null) {
+		connection.sendUTF(currentValue);
+	}
+}
+
